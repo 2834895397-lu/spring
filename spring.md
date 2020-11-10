@@ -563,6 +563,8 @@ Controller返回值写成==**Callable**==类型或者==**DeferredResult**==类�
 
 3. 使用缓存:
 
+   @Cacheable:
+   
    ```java
     //当参数的id大于0的时候缓存才生效, 如果第一个参数的值等于2缓存不生效
        @Cacheable(/*cacheNames = {"emp"},*/ /*key = "#root.methodName+'['+#id+']'"*/ /*keyGenerator = "myKeyGenerator", *//*condition = "#id > 0", unless = "#a0 == 2"*/)
@@ -570,12 +572,64 @@ Controller返回值写成==**Callable**==类型或者==**DeferredResult**==类�
            System.out.println("查询" + id + "号员工");
            Employee emp = employeeMappper.getEmpById(id);
            return emp;
-       }
+    }
    ```
-
    
+   @CachePut:
+
+```java
+@CachePut(/*value = "emp", */key = "#employee.id")
+public Employee updateEmp(Employee employee) {
+    employeeMappper.updateEmp(employee);
+    System.out.println("updateEmp:" + employee);
+    return employee;
+}
+```
+
+​	@CacheEvit:
+
+```java
+@CacheEvict(/*value = "emp", */key = "#id")
+public void deleteEmp(Integer id){
+    employeeMappper.deleteEmpById(id);
+}
+```
+
+@Caching:
+
+```java
+   //定义复杂的缓存规则
+    @Caching(
+            cacheable = {@Cacheable(/*value = "emp", */key = "#lastName")},
+            put = {
+                    @CachePut(/*value = {"emp"},*/ key = "#result.id"),
+                    @CachePut(/*value = "emp",*/ key = "#result.email")
+            }
+    )
+    public Employee getEmployeeByLastName(String lastName){
+        return employeeMappper.getEmpByLastName(lastName);
+    }
+
+
+}
+```
+
+在上述过程中的value或者cacheNames如果嫌麻烦, 也可以统一在类上注明这个类统一使用哪个缓存, 以后就不用在方法中指定缓存的名字了:
+
+```java
+//可以在类的名字上加上缓存的配置, 抽取公共的缓存部分
+@CacheConfig(cacheNames="emp")
+@Service
+public class EmployeeService {
+```
+
+---
+
+
 
 ## 原理
+
+@Cacheable:
 
 ```java
 	/*
@@ -642,11 +696,52 @@ Controller返回值写成==**Callable**==类型或者==**DeferredResult**==类�
          * */
 ```
 
+@CachePut:
 
+```java
+/*
+ * @CachePut: 既调用方法, 又更新缓存数据
+ * 修改了数据库的某个数据, 同时更新缓存
+ * 运行时机:
+ *      1. 先调用目标方法
+ *      2. 将目标方法的结果缓存起来
+ *
+ * 测试步骤:
+ *      1. 查询1号员工, 查到的结果会放到缓存钟
+            key:1  value: lastName: zhangsan
+ *      2.以后查询还是之前的结果
+ *      3. 更新1号员工: [LastName: zhangsan, gender: 0]
+ *              将方法的返回值也放进缓存了.
+ *              key: 传入的employee对象  value: 返回的employee对象
+ *      4. 查询1号员工?
+ *              应该是更新之后的员工, :
+ *                  key="#employee.id": 使用传入的参数的员工的id
+ *                  key="#result.id": 使用返回值的id
+ *                  @Cacheable的key不能使用#result, 因为在没有返回之前就要使用key来查对应的返回结果
+ *      注意: 是否有自己的键的生成话策略, 否则也会更新缓存不成功
+ * 总结: 在使用@CachePut的时候, 不仅要指定缓存的名字, 还要指定缓存的key, 已确保能够正确的更新缓存
+ * */
+/*
+* 更新缓存的原则:  跟新缓存应注意缓存的名字和缓存使用的的key都要跟要更新的缓存一样才能达到更新缓存的效果
+* */
+```
 
-## 键的生成话策略
+@CacheEvit:
 
-实现KeyGenerator或者其子类, 并且添加到容器中:
+```java
+/*
+* @CacheEvict: 清除缓存
+*  key: 指定要清除的数据
+*   allEntries:默认是false, 是否要删除掉所有缓存
+*   beforeInvocation: 缓存的清除是否在方法执行之前, 默认是false
+*       默认代表缓存清除操作是在方法执之后执行; 如果出现异常缓存就不会被清除
+*       如果是true, 则无论如何都会清除缓存
+* */
+```
+
+## 键的生成策略
+
+实现KeyGenerator或者其子类, 并且添加到容器中(key和keyGenerator二选一):
 
 ```java
 @Configuration
@@ -672,9 +767,127 @@ public class MyCacheConfig {
 
 
 
-## redis使用Jackson2JsonRedisSerializer序列化器进行缓存
+## redis的基本使用
 
+1. 常见的五大数据类型:
+
+   ```java
+   /*
+    * Redis常见的五大数据类型
+    *   String, List, Set, Hash, ZSet(有序集合)
+    *   stringRedisTemplate.opsForValue()//操作String的
+    *   stringRedisTemplate.opsForList()//操作List的
+    *   stringRedisTemplate.opsForSet()//操作Set的
+    *   stringRedisTemplate.opsForHash()//操作Hash散列的
+    *   stringRedisTemplate.opsForZSet()//操作ZSet有序集合
+    * */
+   ```
+
+2. 保存对象的时候默认使用的是jdk的序列化机制, 保存的对象要实现序列化接口:
+
+   ```java
+   public class Employee implements Serializable {...}
+   ```
+
+   ```java
+   @Test
+   public void test02(){
+       //默认如果保存对象, 使用jdk序列化机制, 序列化后的数据保存到redis中
+       /*
+       *  redisTemplate.opsForValue().set("emp-01", emp);
+       * 1. 将数据以json的方式保存的两种方法:
+       *       1). 自己将对象转为json
+       *       2). RedisTemplate默认的序列化规则, 改变默认的序列化规则即可;
+       *
+       * */
+       Employee emp = employeeMappper.getEmpById(2);
+       redisTemplate.opsForValue().set("emp-1", emp);
+   }
+   ```
+
+   
+
+   ## 自定义redis的序列化器
+
+   RedisTemplate中设置默认的序列化器即可:  
+
+   ==template.setDefaultSerializer(new Jackson2JsonRedisSerializer<Employee>(Employee.class));==
+
+   ```java
+   @Bean
+   public RedisTemplate<Object, Employee> redisTemplate(RedisConnectionFactory redisConnectionFactory)
+           throws UnknownHostException {
+       RedisTemplate<Object, Employee> template = new RedisTemplate<Object, Employee>();
+       template.setConnectionFactory(redisConnectionFactory);
+       template.setDefaultSerializer(new Jackson2JsonRedisSerializer<Employee>(Employee.class));
+       return template;
+   }
+   ```
+
+   
+
+# redis缓存
+
+引入了redis, RedisCacheManager就起作用了, **没有引入redis之前, 默认使用的是ConcurrentMapCacheManager==ConcurrenMapCache;将数据保存在ConcurrentMap<Object, Object>**
+
+**引入了redis之后容器中保存的是RedisCacheManager==RedisCache,RedisCache来通过操作Redis来存储数据**
+
+**默认保存数据k-v都是Object; 利用序列化保存**
+
+
+
+==自定义redis缓存的序列化器:==
+
+1. 配置 序列化器(jackson2JsonRedisSerializer)
+2. 在RedisCacheConfiguration中设置序列化器(jackson2JsonRedisSerializer)
+
+```java
+/*
+* 自定义缓存的序列化机制
+* */
+//容器会自动检测到这个CacheManager,并替换原来自带的CacheManager
+@Primary //若配置多个缓存管理器需要有一个默认的缓存管理器
+@Bean
+public RedisCacheManager myCacheManager(RedisConnectionFactory redisConnectionFactory){
+    RedisSerializer<String> redisSerializer = new StringRedisSerializer();
+    //.entryTtl(Duration.ofHours(1)); // 设置缓存有效期一小时
+    Jackson2JsonRedisSerializer jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer(Object.class);
+
+    ObjectMapper om = new ObjectMapper();
+    om.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+    om.enableDefaultTyping(ObjectMapper.DefaultTyping.NON_FINAL);
+    jackson2JsonRedisSerializer.setObjectMapper(om);
+
+    // 配置序列化（解决乱码的问题）
+    RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
+            .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(redisSerializer))
+            .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jackson2JsonRedisSerializer))
+            .disableCachingNullValues();
+
+    RedisCacheManager cacheManager = RedisCacheManager.builder(redisConnectionFactory)
+            .cacheDefaults(config)
+            .build();
+    return cacheManager;
+}
 ```
 
+## redis缓存的使用
+
+注解方式跟上述缓存的用法一样
+
+编码方式来操作缓存:
+
+```java
+@Autowired
+CacheManager cacheManager;
+
+    public Department getDeptById(Integer id) {
+        Department department = departmentMapper.getDeptById(id);
+        //代码的方式添加缓存获取某个缓存
+        //使用缓存管理器得到缓存, 进行api调用
+        Cache cache = cacheManager.getCache("dept");
+        cache.put("key", department);
+        return department;
+    }
 ```
 
