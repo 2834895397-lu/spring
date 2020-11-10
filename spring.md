@@ -891,3 +891,122 @@ CacheManager cacheManager;
     }
 ```
 
+---
+
+
+
+---
+
+
+
+# springboot与任务
+
+
+
+## 异步任务
+
+1. 开启异步注解:==@EnableAsync==
+
+```java
+@EnableAsync//开始异步注解功能
+@Configuration
+public class Xxx{..}
+```
+
+2. 使用异步注解: ==@Async==
+
+```java
+@Service
+public class AsyncService {
+    @Async//告诉spring这是一个异步方法, 这个注解起作用, 必须开始@EnableAsync
+    public void hello() {
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("处理数据中.....");
+    }
+
+}
+```
+
+对于上述代码, springboot会==对标注了@Async的方法开启一个线程==
+
+
+
+## 定时任务
+
+==**使用定时任务的类一定是容器中的bean**==
+
+![image-20201110213814180](img/image-20201110213814180.png)
+
+
+
+使用:
+
+1. 开启基于注解的定时任务:
+
+```java
+@EnableScheduling//开始定时任务功能
+@Configuration
+public class Xxx {...}
+```
+
+2. 使用注解:
+
+```java
+@Service
+public class ScheduledService {
+
+    /*
+    * second, minute, hour, day of month, month, and day of week.
+    * 0 * * * * MON-FRI
+    * [0 0/5 14,18 * * ?]每天14点整, 和18点整, 每隔5分钟执行一次
+    * [0 15 10 ? * 1-6]每个月的周一到周六10:15分执行一次
+    * [0 0 2 ? * 6L]每个月的最后一个周六凌晨两点执行一次
+    * [0 0 2 LW * ?]每个月的最后一个工作日凌晨狼点执行一次
+    * [0 0 2-4 ? * 1#2]每个月的第二个周一凌晨两点到四点期间, 每个整点都执行一次
+    * */
+//    必须得提前开启定时任务功能
+    @Scheduled(cron = "0 * * * * MON-SAT")
+    public void hello(){
+        System.out.println("hello....");
+
+    }
+}
+```
+
+---
+
+
+
+## 邮件任务
+
+![image-20201110215505962](img/image-20201110215505962.png)
+
+
+
+
+
+邮件发送的流程:
+
+邮件的发送时邮箱服务器之间的通信, 张三要给李四发送邮件, 应该要发送到自己的邮箱服务器上, 再通过各自的服务器发送到客户端中:
+
+![image-20201110215928993](img/image-20201110215928993.png)
+
+
+
+使用:
+
+1. 配置邮箱信息:
+
+![image-20201110220906710](img/image-20201110220906710.png)
+
+2. 发送简单邮件:
+
+![image-20201110221032423](img/image-20201110221032423.png)
+
+3. 发送复杂邮件:
+
+![image-20201110221620251](img/image-20201110221620251.png)
