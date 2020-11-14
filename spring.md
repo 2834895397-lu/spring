@@ -1010,3 +1010,502 @@ public class ScheduledService {
 3. 发送复杂邮件:
 
 ![image-20201110221620251](img/image-20201110221620251.png)
+
+
+
+---
+
+
+
+# 高级消息
+
+概念:
+
+![image-20201113212141404](img/image-20201113212141404.png)
+
+
+
+消息代理: 消息中间件的服务器                                                目的地有两种方式: 队列, 主题
+
+![image-20201113212459800](img/image-20201113212459800.png)
+
+
+
+jms 和 amqp 两者之间的对比:
+
+![image-20201113213037153](img/image-20201113213037153.png)
+
+
+
+
+
+## spring对jms和qmqp的支持:
+
+1. ==**spring-jms提供了对jms的支持**==
+2. ==**spring-rabbit提供了对qmqp的支持**==
+3. ==**需要ConnectionFactory的实现来连接消息代理(消息代理服务器)**==
+4. ==**提供JmsTemplate, RabbitTemplate来发送消息**==
+5. ==**@JmsListener(JMS), @RabbitListener(AMQP)注解在方法上监听消息代理发布的消息**==
+6. ==**@EnableJms, @EnableRabbit开启支持**==
+
+
+
+具体的自动配置: 
+
+1. JmsAutoConfiguration
+2. RabbitAutoConfiguration
+
+
+
+## RabbitMQ
+
+简介:
+
+![image-20201113214446661](img/image-20201113214446661.png)
+
+![image-20201113214805118](img/image-20201113214805118.png)
+
+Virtual Host: 消息服务器里面有很多虚拟主机, 每一个虚拟主机都是一个mini版的消息服务器, **连接消息服务器必须先连接虚拟主机, 默认是/**
+
+![image-20201113215341529](img/image-20201113215341529.png)
+
+
+
+![image-20201113215437758](img/image-20201113215437758.png)
+
+![image-20201113215823942](img/image-20201113215823942.png)
+
+![image-20201113220300686](img/image-20201113220300686.png)
+
+
+
+
+
+自动配置:
+
+```java
+/*
+* 自动配置:
+*       1. RabbitAutoConfiguration
+*       2. 有自动配置了连接工厂ConnectionFactory
+*       3. RabbitProperties封装了RabbtiMQ的配置
+*       4. RabbitTemplate: 给rabbitMQ发送和接收消息的
+*       5. AmqpAdmin: RabbitMQ系统管理组件, 可以创建和销毁交换器或者队列
+*       6. @EnableRabbit + @RabbitListener
+* */
+```
+
+
+
+简单使用:
+
+1. 配置rabbitmq信息:   端口号默认是5672(ssl是5671)  , virtual Host默认是/
+
+```java
+spring.rabbitmq.host=localhost
+spring.rabbitmq.username=guest
+spring.rabbitmq.password=guest
+spring.rabbitmq.virtual-host=/
+```
+
+2. 开启基于注解的RabbitMQ模式: ==**@EnableRabbit**==
+3. 使用注解:   @RabbitListener(queues = "xxx")
+
+```java
+@Service
+public class BookService {
+    @RabbitListener(queues = "atguigu.emps")
+    public void receive(Book book) {
+        System.out.println("收到消息" + book);
+    }
+
+    //不需要反序列化, 直接监听完整的消息:(Message)
+    @RabbitListener(queues = "atguigu")
+    public void receive02(Message message) {
+        System.out.println(message.getBody());
+        //消息头信息
+        System.out.println(message.getMessageProperties());
+    }
+}
+```
+
+**自己定义序列化规则:**
+
+```java
+@Configuration
+public class MyAMQPConfig {
+    //两种方式解决序列化问题:
+
+//1.
+    @Bean
+    public MessageConverter messageConverter(){
+       return new Jackson2JsonMessageConverter();
+    }
+
+
+   //2.
+   /* @Bean
+    public RabbitTemplate rabbitTemplate(RabbitTemplateConfigurer configurer, ConnectionFactory connectionFactory) {
+        RabbitTemplate template = new RabbitTemplate();
+        template.setMessageConverter(new Jackson2JsonMessageConverter());
+        configurer.configure(template, connectionFactory);
+        return template;
+    }*/
+}
+```
+
+
+
+**基于代码的方式来发送, 接收, 创建消息:**
+
+```java
+@Autowired
+RabbitTemplate rabbitTemplate;//发送和接收消息
+
+@Autowired
+AmqpAdmin amqpAdmin;//创建和管理rabbit组件
+
+ //点播模式
+    @Test
+    void putMassage() {
+        //message需要自己构建一个, 定义消息体内容和消息头
+        //rabbitTemplate.send(exchange, routKey, message);
+
+        //object默认当成消息体, 只需要传入要发送的对象, 自动序列化发送给rabbitMQ;
+        //rabbitTemplate.convertAndSend(exchange, routKey, Object);
+
+        HashMap<Object, Object> map = new HashMap<>();
+        map.put("msg", "这是第一个消息");
+        map.put("data", Arrays.asList("helloworld", 123, true));
+        //对象被默认序列化之后发送出去
+        rabbitTemplate.convertAndSend("exchange.direct", "atguigu", new Book("西游记", "吴承恩"));
+    }
+
+    @Test
+    //接收数据, 如何将数据转为json发送出去?
+    public void receive(){
+        Object o = rabbitTemplate.receiveAndConvert("atguigu.news");//队列的名字
+        System.out.println(o.getClass());
+        System.out.println(o);
+    }
+
+
+    //广播模式
+    @Test
+    public void sendMsg(){
+        rabbitTemplate.convertAndSend("exchange.fanout", "", new Book("三国演义", "罗贯中"));
+
+    }
+
+    @Test
+    public void createExchange(){
+        //创建一个交换器
+        amqpAdmin.declareExchange(new DirectExchange("amqpadmin.exchange"));
+        System.out.println("创建完成");
+
+        //创建一个队列
+        amqpAdmin.declareQueue(new Queue("amqpadmin.queue", true));//队列是否持久化
+
+        //创建绑定规则: 绑定可以是交换器和交换器绑定, 也可以是交换器和队列进行绑定
+        amqpAdmin.declareBinding(new Binding("amqpadmin.queue", Binding.DestinationType.QUEUE,"amqpadmin.exchange","amqpadmin.routingKey",null ));
+
+
+    }
+```
+
+
+
+---
+
+
+
+
+
+# springboot与检索
+
+![image-20201114133422689](img/image-20201114133422689.png)
+
+Elasticsearch几个重要的概念:    ==**索引, 类型, 文档 属性**==
+
+![image-20201114134132836](img/image-20201114134132836.png)
+
+**存储员工restful风格示例:**  
+
+==请求类型:     put存储, get获取(/megacorp/employee/1), delete删除, head:检查是否有这条文档, 如果有则相应状态码为200, 如果需要更新已存在的文档, 则只需要再次put, 更新的时候版本会叠加==
+
+![image-20201114134735006](img/image-20201114134735006.png)
+
+---
+
+![image-20201114140146775](img/image-20201114140146775.png)
+
+---
+
+
+
+高级搜索查询:
+
+==上述使用了文档的id标识来搜索文档, 高级搜索可以用_search来替换文档id标识, 然后附带搜索参数?q来进行高级检索:==
+
+![image-20201114140544876](img/image-20201114140544876.png)
+
+上述搜索last_name为Smith的文档
+
+
+
+==也可以在请求体中的json来指定查询规则:==
+
+![image-20201114141106165](img/image-20201114141106165.png)
+
+上述的查询达到的效果是一样的
+
+
+
+甚至会在json中定义更为复杂的查询表达式:(只要查询到的结果年龄大于30的文档, ==**filter: 条件为true时才返回) must match为精确匹配, 只能等于, 不能是包含关系**==
+
+![image-20201114141749996](img/image-20201114141749996.png)
+
+
+
+---
+
+
+
+
+
+没有精确匹配(must)的时候就会用包含(拆分)关系来查找:
+
+![image-20201114142401883](img/image-20201114142401883.png)
+
+![image-20201114142521240](img/image-20201114142521240.png)
+
+
+
+---
+
+
+
+
+
+把"rock climbing"当成一个单词来搜索:(必须得要完整的出现)
+
+![image-20201114142706368](img/image-20201114142706368.png)
+
+查找结果:
+
+![image-20201114142833301](img/image-20201114142833301.png)
+
+
+
+---
+
+
+
+高亮搜索:
+
+搜索出来后对about字段进行高亮显示:
+
+![image-20201114143231428](img/image-20201114143231428.png)
+
+查询到的结果: 可以获取直接渲染在html页面上
+
+![image-20201114143326695](img/image-20201114143326695.png)
+
+
+
+---
+
+
+
+==**上述总结:**==
+
+==**match之前:**==
+
+1. ==**must: 精确匹配, 只能完全相等, 不能多也不能少**==
+2. ==**没有指定则按照空格拆分单词进行查找**==
+3. ==**match_phrase: 规定为一个单词来进行查找, 有空格也不能拆分**==
+
+
+
+==**highlight -->  fields --> xxx:  对查询之后xxx字段高亮显示**==
+
+---
+
+
+
+springboot的两种技术和es(elasticsearch)交互:
+
+```java
+/*
+* springboot默认支持两种技术和es交互
+*   1. jest(默认不生效)
+*        需要导入的工具包(io.searchbox.client.JestClient)
+*   2. SpringData Elasticsearch操作es[es版本有可能不合适]
+*           如果版本不适配, 可以升级springboot版本或者安装对应版本的es
+*           1). Client节点信息clusternodes; clusterName
+*           2).ElasticsearchTemplate操作es
+*           3). 编写一个ElasticsearchRepository的子接口来操作es
+*
+* */
+```
+
+**如果要用jest操作es则引入jest的依赖, 如果要用springdata elasticsearch来跟es交互则需要引入springdata elasticsearch依赖**
+
+
+
+
+
+## 简单使用:
+
+
+
+方式一: jest方式与es交互:
+
+1. 引入jest依赖:
+
+```xml
+<!--对用着es的版本来引入jest-->
+<!-- https://mvnrepository.com/artifact/io.searchbox/jest -->
+<dependency>
+    <groupId>io.searchbox</groupId>
+    <artifactId>jest</artifactId>
+    <version>6.3.1</version>
+</dependency>
+```
+
+2. 配置jest的uris:
+
+`spring.elasticsearch.jest.uris=localhost:9200`
+
+3. 使用@JestId来标记要保存文档的主键:
+
+```java
+public class Article {
+
+    @JestId
+    private Integer id;
+    private String author;
+    private String title;
+    private String content;
+    ...
+}
+```
+
+4. 使用JestClient来保存文档:
+
+```java
+@Autowired
+JestClient jestClient;
+
+@Test
+void contextLoads() {
+    //1. 给es索引(保存)一个文档
+    Article article = new Article();
+    article.setId(1);
+    article.setTitle("好消息");
+    article.setAuthor("zhangsan");
+    article.setContent("hello world");
+
+    //构建一个索引
+    Index index = new Index.Builder(article).index("atguigu").type("news").build();
+   try {
+       jestClient.execute(index);
+
+   }catch (Exception e){
+       e.printStackTrace();
+
+   }
+```
+
+5. 使用jestClient来搜索文档:
+
+```java
+//测试搜索
+@Test
+public void search(){
+    //查询表达式
+    String json = "{
+
+   'query':{
+
+​            'match':{
+
+​                   'last_name': 'Smith'							
+
+​              }
+
+   }
+
+}";
+    //构建搜索功能
+    Search search = new Search.Builder(json).addIndex("atguigu").addType("news").build();
+
+    try {
+        SearchResult searchResult = jestClient.execute(search);
+        System.out.println(searchResult.getJsonString());
+    }catch (IOException e){
+        e.printStackTrace();
+    }
+}
+```
+
+
+
+方式二: spring Data的方式来操作es:
+
+1. 引入spring-boot-starter-data-elasticsearch的依赖:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+</dependency>
+```
+
+2. 配置信息:
+
+```xml
+spring.data.elasticsearch.cluster-name=elasticsearch
+spring.data.elasticsearch.cluster-nodes=localhost:9300
+```
+
+3. 给要存储的实体类使用==**@Document**==标注上文档信息: **所需要存储到的索引的名字inidexName  和类型 indexStoreType:**
+
+```java
+@Document(indexName = "atguigu", indexStoreType = "book")
+public class Book {
+    private Integer id;
+    private String bookName;
+    private String author;
+ ...
+}
+```
+
+4. ==**继承ElasticsearchRepository**==
+
+```java
+public interface BookRepository extends ElasticsearchRepository<Book,Integer> {
+
+    //自己扩展方法, 不用写实现, 方法命令按照spring的约定, 然后就可以直接使用这个方法了
+    //具体命名规范可以查看spring官方文档
+    public List<Book> findByBookNameLike(String bookName);
+}
+```
+
+5. 使用相关的repository:
+
+```
+@Autowired
+BookRepository bookRepository;
+
+ @Test
+    public void testElasticsearchRepository() {
+        //Book book = new Book(1, "西游记", "吴承恩");
+        //bookRepository.save(book);
+
+      for (Book findBook: bookRepository.findByBookNameLike("游")){
+          System.out.println(findBook);
+        }
+
+    }
+```
