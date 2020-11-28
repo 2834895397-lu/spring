@@ -1,3 +1,7 @@
+# transiction问题
+
+==**如果使用了@transiction注解, 如果是正常return则直接提交事务, 所以尽量不要在if里面进行return, 只要一return马上提交事务, 我们要求的是当方法出现异常的时候就回滚**==
+
 # servlet容器运行流程
 
 1. Servlet容器启动会扫描，当前应用里面每一个jar包的
