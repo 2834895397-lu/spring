@@ -1513,3 +1513,12 @@ BookRepository bookRepository;
 
     }
 ```
+
+
+
+# mybatis的druid允许sql注入
+
+开启即可:
+
+`spring.datasource.dynamic.druid.wall.multi-statement-allow`
+
