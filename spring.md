@@ -972,7 +972,6 @@ public class ScheduledService {0 59 23 * * ?
     * [0 0 2 LW * ?]每个月的最后一个工作日凌晨狼点执行一次
     * [0 0 2-4 ? * 1#2]每个月的第二个周一凌晨两点到四点期间, 每个整点都执行一次
     * */
-    0 0 1 * * ?
 //    必须得提前开启定时任务功能
     @Scheduled(cron = "0 * * * * MON-SAT")
     public void hello(){
@@ -1499,7 +1498,7 @@ public interface BookRepository extends ElasticsearchRepository<Book,Integer> {
 
 5. 使用相关的repository:
 
-```
+```java
 @Autowired
 BookRepository bookRepository;
 
